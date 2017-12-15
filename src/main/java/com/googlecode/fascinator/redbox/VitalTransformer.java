@@ -1454,7 +1454,7 @@ public class VitalTransformer implements Transformer {
         public static String CONFIG_SERVER = "server";
         // Default values
         public static String FEDORA_TEST_PID = "fedora-system:FedoraObject-3.0";
-        public static String FEDORA_VERSION_TEST = "3.z";
+        public static String FEDORA_VERSION_TEST = "3.";
         public static String FOXML_VERSION =
                 "info:fedora/fedora-system:FOXML-1.1";
         public static String DEFAULT_EMAIL_SUBJECT = "VITAL Transformer error";
