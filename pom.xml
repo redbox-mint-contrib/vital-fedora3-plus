@@ -36,18 +36,6 @@
             <artifactId>slf4j-api</artifactId>
             <version>1.7.25</version>
         </dependency>
-        <!-- Fedora client -->
-        <!--<dependency>-->
-            <!--<groupId>org.fcrepo</groupId>-->
-            <!--<artifactId>fcrepo-client-admin</artifactId>-->
-            <!--<version>3.5</version>-->
-        <!--</dependency>-->
-        <!-- Fedora Dependencies -->
-        <!--<dependency>-->
-            <!--<groupId>org.fcrepo</groupId>-->
-            <!--<artifactId>trippi-core</artifactId>-->
-            <!--<version>1.4.1</version>-->
-        <!--</dependency>-->
         <dependency>
             <groupId>org.codehaus.woodstox</groupId>
             <artifactId>stax2-api</artifactId>

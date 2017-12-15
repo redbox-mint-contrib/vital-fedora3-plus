@@ -41,14 +41,12 @@ import com.yourmediashelf.fedora.client.FedoraClient;
 import com.yourmediashelf.fedora.client.FedoraClientException;
 import com.yourmediashelf.fedora.client.FedoraCredentials;
 import com.yourmediashelf.fedora.client.response.*;
-import com.yourmediashelf.fedora.generated.management.DatastreamProfile;
 import com.yourmediashelf.fedora.generated.access.DatastreamType;
-
+import com.yourmediashelf.fedora.generated.management.DatastreamProfile;
 import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.util.CollectionUtils;
 
 import java.io.*;
 import java.net.MalformedURLException;
@@ -57,11 +55,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.yourmediashelf.fedora.client.FedoraClient.getObjectProfile;
-
-//import org.fcrepo.client.FedoraClient;
-////import org.fcrepo.server.management.FedoraAPIM;
-//import org.fcrepo.server.types.gen.Datastream;
-//import org.fcrepo.server.types.gen.DatastreamDef;
 
 /**
  * A Transformer to notify VITAL of completed objects in ReDBox.
@@ -1262,7 +1255,7 @@ public class VitalTransformer implements Transformer {
      * @returns Datastream The datastream requested, null if not found
      */
     private DatastreamProfileResponse getDatastream(FedoraClient fedoraClient, String vitalPid,
-                                                String dsPid) {
+                                                    String dsPid) {
         try {
             return FedoraClient.getDatastream(vitalPid, dsPid).execute(fedoraClient);
         } catch (Exception ex) {
