@@ -1,22 +1,22 @@
 /*
- * ReDBox - VITAL Transformer
- * Copyright (C) 2011 University of Southern Queensland
- * Copyright (C) 2011 Queensland Cyber Infrastructure Foundation (http://www.qcif.edu.au/)
+ * Copyright (C) 2017 Queensland Cyber Infrastructure Foundation (http://www.qcif.edu.au/)
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ *   This program is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation; either version 2 of the License, or
+ *   (at your option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *   You should have received a copy of the GNU General Public License along
+ *   with this program; if not, write to the Free Software Foundation, Inc.,
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
  */
+
 package com.googlecode.fascinator.redbox;
 
 import com.googlecode.fascinator.api.PluginDescription;
@@ -37,70 +37,76 @@ import com.googlecode.fascinator.common.messaging.MessagingException;
 import com.googlecode.fascinator.common.messaging.MessagingServices;
 import com.googlecode.fascinator.common.solr.SolrDoc;
 import com.googlecode.fascinator.common.solr.SolrResult;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
-
-import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
+import com.yourmediashelf.fedora.client.FedoraClient;
+import com.yourmediashelf.fedora.client.FedoraCredentials;
+import com.yourmediashelf.fedora.client.response.FedoraResponse;
+import com.yourmediashelf.fedora.client.response.GetObjectProfileResponse;
+import com.yourmediashelf.fedora.client.response.IngestResponse;
 import org.apache.commons.io.IOUtils;
-import org.fcrepo.client.FedoraClient;
-import org.fcrepo.server.management.FedoraAPIM;
-import org.fcrepo.server.types.gen.Datastream;
-import org.fcrepo.server.types.gen.DatastreamDef;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.*;
+import java.net.MalformedURLException;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static com.yourmediashelf.fedora.client.FedoraClient.getObjectProfile;
+import static com.yourmediashelf.fedora.client.FedoraClient.modifyObject;
+
+//import org.fcrepo.client.FedoraClient;
+////import org.fcrepo.server.management.FedoraAPIM;
+//import org.fcrepo.server.types.gen.Datastream;
+//import org.fcrepo.server.types.gen.DatastreamDef;
+
 /**
  * A Transformer to notify VITAL of completed objects in ReDBox.
- * 
+ *
  * @author Greg Pendlebury
+ * @author Matt Mulholland
  */
 public class VitalTransformer implements Transformer {
-    /** Logging */
+    /**
+     * Logging
+     */
     private final Logger log = LoggerFactory.getLogger(VitalTransformer.class);
 
-    /** Messaging */
+    /**
+     * Messaging
+     */
     private MessagingServices messaging;
     private String emailQueue;
     private List<String> emailAddresses;
     private String emailSubject;
     private String emailTemplate;
 
-    /** Fascinator plugins */
+    /**
+     * Fascinator plugins
+     */
     private Storage storage;
     private Indexer indexer;
 
-    /** Fedora */
+    /**
+     * Fedora
+     */
     private String fedoraUrl;
     private String fedoraUsername;
     private String fedoraPassword;
     private String fedoraNamespace;
     // Template for log entries
     private String fedoraMessageTemplate;
-    private int fedoraTimeout;
+//    private int fedoraTimeout;
 
-    /** Valid instantiation */
+    /**
+     * Valid instantiation
+     */
     boolean valid = false;
 
-    /** VITAL integration config */
+    /**
+     * VITAL integration config
+     */
     private Map<String, JsonSimple> pids;
     private String attachDs;
     private String attachStatusField;
@@ -113,16 +119,20 @@ public class VitalTransformer implements Transformer {
     private Map<String, List<String>> attachAltIds;
     private File foxmlTemplate;
 
-    /** Temp directory */
+    /**
+     * Temp directory
+     */
     private File tmpDir;
 
-    /** Wait conditions */
+    /**
+     * Wait conditions
+     */
     private List<String> waitProperties;
 
     /**
      * Gets an identifier for this type of plugin. This should be a simple
      * name such as "file-system" for a storage plugin, for example.
-     * 
+     *
      * @return the plugin type id
      */
     @Override
@@ -132,7 +142,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Gets a name for this plugin. This should be a descriptive name.
-     * 
+     *
      * @return the plugin name
      */
     @Override
@@ -142,7 +152,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Gets a PluginDescription object relating to this plugin.
-     * 
+     *
      * @return a PluginDescription
      */
     @Override
@@ -152,7 +162,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Initializes the plugin using the specified JSON String
-     * 
+     *
      * @param jsonString JSON configuration string
      * @throws TransformerException if there was an error in initialization
      */
@@ -167,7 +177,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Initializes the plugin using the specified JSON configuration
-     * 
+     *
      * @param jsonFile JSON configuration file
      * @throws TransformerException if there was an error in initialization
      */
@@ -182,7 +192,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Initialization of plugin
-     * 
+     *
      * @param config The configuration to use
      * @throws TransformerException if fails to initialize
      */
@@ -197,8 +207,8 @@ public class VitalTransformer implements Transformer {
                 Strings.CONFIG_SERVER, "username");
         fedoraPassword = config.getString(null,
                 Strings.CONFIG_SERVER, "password");
-        fedoraTimeout = config.getInteger(15,
-                Strings.CONFIG_SERVER, "timeout");
+//        fedoraTimeout = config.getInteger(15,
+//                Strings.CONFIG_SERVER, "timeout");
         if (fedoraUrl == null || fedoraNamespace == null ||
                 fedoraUsername == null || fedoraPassword == null) {
             throw new TransformerException(
@@ -257,7 +267,7 @@ public class VitalTransformer implements Transformer {
         if (!m.find()) {
             throw new TransformerException(
                     "'*/attachments/dsId' must have a format placeholder for incrementing integer, eg. '%d' or '%02d'. The value provided ('"
-                    + attachDs + "') is invalid");
+                            + attachDs + "') is invalid");
         }
         attachStatusField = attachmentsConfig.getString(null, "statusField");
         attachStatuses = getStringMap(attachmentsConfig, "status");
@@ -358,7 +368,7 @@ public class VitalTransformer implements Transformer {
                 foxmlTemplate = null;
                 throw new TransformerException(
                         "The new object template provided does not exist: '"
-                        + templatePath + "'");
+                                + templatePath + "'");
             }
         }
 
@@ -386,7 +396,7 @@ public class VitalTransformer implements Transformer {
     /**
      * Trivial wrapper on the JsonConfigHelper getMap() method to cast all map
      * entries to strings if appropriate and return.
-     * 
+     *
      * @param json The json object to query.
      * @param path The path on which the map is found.
      * @return Map<String, String>: The object map cast to Strings
@@ -409,11 +419,11 @@ public class VitalTransformer implements Transformer {
     /**
      * Establish a connection to Fedora's management API (API-M) to confirm
      * credentials, then return the instantiated fedora client used to connect.
-     * 
+     *
      * @param firstConnection If this is the first connection (ie. from the
-     *      Constructor), set this flag. Some logging will occur, and a basic
-     *      API call will be triggered to test genuine connectivity with regards
-     *      to the network and the credentials supplied.
+     *                        Constructor), set this flag. Some logging will occur, and a basic
+     *                        API call will be triggered to test genuine connectivity with regards
+     *                        to the network and the credentials supplied.
      * @return FedoraClient The client used to connect to the API
      * @throws TransformerException if there was an error
      */
@@ -423,17 +433,18 @@ public class VitalTransformer implements Transformer {
 
     private FedoraClient fedoraConnect(boolean firstConnection)
             throws TransformerException {
-        FedoraClient fedora = null;
+        FedoraClient fedoraClient = null;
         try {
             // Connect to the server
-            fedora = new FedoraClient(
-                    fedoraUrl, fedoraUsername, fedoraPassword);
-            fedora.SOCKET_TIMEOUT_SECONDS = fedoraTimeout;
+            fedoraClient = new FedoraClient(new FedoraCredentials(fedoraUrl,
+                    fedoraUsername, fedoraPassword));
+            //Cannot set socket timeout with yourshelf client
+//            fedoraClient.SOCKET_TIMEOUT_SECONDS = fedoraTimeout;
             if (firstConnection) {
                 log.info("Connected to FEDORA : '{}'", fedoraUrl);
             }
             // Make sure we can get the server version
-            String version = fedora.getServerVersion();
+            String version = fedoraClient.getServerVersion();
             // Version cutout
             if (!version.startsWith(Strings.FEDORA_VERSION_TEST)) {
                 throw new StorageException(
@@ -443,15 +454,15 @@ public class VitalTransformer implements Transformer {
             if (firstConnection) {
                 log.info("FEDORA version: '{}'", version);
             }
-            // And that we have appropriate access to the management API
-            FedoraAPIM apim = fedora.getAPIM();
             if (firstConnection) {
-                log.info("API-M access testing... {} second timeout",
-                        fedoraTimeout);
-                byte[] data = apim.getObjectXML(Strings.FEDORA_TEST_PID);
-                if (data != null && data.length > 0) {
-                    log.info("API-M access confirmed: '{}' = {} bytes",
-                            Strings.FEDORA_TEST_PID, data.length);
+//                log.info("Access testing... {} second timeout",
+//                        fedoraTimeout);
+                FedoraResponse response = FedoraClient
+                        .getObjectXML(Strings.FEDORA_TEST_PID).execute(fedoraClient);
+                String data = response.getEntity(String.class);
+                if (data != null && data.getBytes().length > 0) {
+                    log.info("Access checked: '{}' = {} bytes", Strings.FEDORA_TEST_PID,
+                            data.getBytes().length);
                 } else {
                     throw new StorageException("Error; could not retrieve "
                             + Strings.FEDORA_TEST_PID);
@@ -467,12 +478,12 @@ public class VitalTransformer implements Transformer {
             throw new TransformerException(
                     "Error accesing management API! : ", ex);
         }
-        return fedora;
+        return fedoraClient;
     }
 
     /**
      * Shuts down the plugin
-     * 
+     *
      * @throws TransformerException if there was an error during shutdown
      */
     @Override
@@ -499,8 +510,8 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Transform method
-     * 
-     * @param object DigitalObject to be transformed
+     *
+     * @param object     DigitalObject to be transformed
      * @param jsonConfig String containing configuration for this item
      * @return DigitalObject The object after being transformed
      * @throws TransformerException
@@ -517,10 +528,10 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Top level wrapping method for a processing an object.
-     * 
+     * <p>
      * This method first performs all the basic checks whether this Object is
      * technically ready to go to VITAL (no matter what the workflow says).
-     * 
+     *
      * @param param Map of key/value pairs to add to the index
      */
     private DigitalObject process(DigitalObject in, String jsonConfig)
@@ -570,20 +581,20 @@ public class VitalTransformer implements Transformer {
      * Middle level wrapping method for processing objects. Now we are looking
      * at what actually needs to be done. Has the object already been put in
      * VITAL, or is it new.
-     * 
-     * @param object The Object in question
+     *
+     * @param object   The Object in question
      * @param workflow The workflow data for the object
      * @param metadata The Object's metadata
      */
     private DigitalObject processObject(DigitalObject object,
-            JsonSimple workflow, Properties metadata)
+                                        JsonSimple workflow, Properties metadata)
             throws TransformerException {
         String oid = object.getId();
         String title = workflow.getString(null, Strings.NODE_FORMDATA, "title");
-        FedoraClient fedora = null;
+        FedoraClient fedoraClient = null;
 
         try {
-            fedora = fedoraConnect();
+            fedoraClient = fedoraConnect();
         } catch (TransformerException ex) {
             error("Error connecting to VITAL", ex, oid, title);
         }
@@ -593,7 +604,7 @@ public class VitalTransformer implements Transformer {
         if (vitalPid != null) {
             log.debug("Existing VITAL object: '{}'", vitalPid);
             // Make sure it exists, we'll test the DC datastream
-            if (!datastreamExists(fedora, vitalPid, "DC")) {
+            if (!datastreamExists(fedoraClient, vitalPid, "DC")) {
                 // How did this happen? Better let someone know
                 String message = " !!! WARNING !!! The expected VITAL object '"
                         + vitalPid +
@@ -606,7 +617,7 @@ public class VitalTransformer implements Transformer {
         // A new VITAL object
         if (vitalPid == null) {
             try {
-                vitalPid = createNewObject(fedora, object.getId());
+                vitalPid = createNewObject(fedoraClient, object.getId());
                 log.debug("New VITAL object created: '{}'", vitalPid);
                 metadata.setProperty(Strings.PROP_VITAL_KEY, vitalPid);
                 // Trigger a save on the object's metadata
@@ -643,8 +654,14 @@ public class VitalTransformer implements Transformer {
                 if (cutTitle.length() > 250) {
                     cutTitle = cutTitle.substring(0, 250) + "...";
                 }
-                fedora.getAPIM().modifyObject(vitalPid, "A", cutTitle, null,
-                        "ReDBox activating object: '" + oid + "'");
+                FedoraResponse response = FedoraClient.modifyObject(vitalPid)
+                        .state("A")
+                        .label(cutTitle)
+                        .logMessage("ReDBox activating object: '" + oid + "'")
+                        .execute();
+                log.info("Checking modify response status is 200 and state is A...");
+                GetObjectProfileResponse op = getObjectProfile(vitalPid).execute();
+                log.info("PID: {}, Status: {}, State: {}", op.getPid(), response.getStatus(), op.getState());
                 // Record this so we don't do it again
                 metadata.setProperty(Strings.PROP_VITAL_ACTIVE, "true");
                 object.close();
@@ -655,7 +672,7 @@ public class VitalTransformer implements Transformer {
 
         // Submit all the payloads to VITAL now
         try {
-            processDatastreams(fedora, object, vitalPid);
+            processDatastreams(fedoraClient, object, vitalPid);
         } catch (Exception ex) {
             error("Failed to send object to VITAL", ex, oid, title);
         }
@@ -664,25 +681,25 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Create a new VITAL object and return the PID.
-     * 
+     *
      * @param fedora An instantiated fedora client
-     * @param oid The ID of the ReDBox object we will store here. For logging
+     * @param oid    The ID of the ReDBox object we will store here. For logging
      * @return String The new VITAL PID that was just created
      */
     private String createNewObject(FedoraClient fedora, String oid)
             throws Exception {
         InputStream in = null;
-        byte[] template = null;
+        String template = null;
         // Start by reading our FOXML template into memory
         try {
             if (foxmlTemplate != null) {
                 // We have a user provided template
                 in = new FileInputStream(foxmlTemplate);
-                template = IOUtils.toByteArray(in);
+                template = IOUtils.toString(in);
             } else {
                 // Use the built in template
                 in = getClass().getResourceAsStream("/foxml_template.xml");
-                template = IOUtils.toByteArray(in);
+                template = IOUtils.toString(in);
             }
         } catch (IOException ex) {
             throw new Exception(
@@ -693,9 +710,12 @@ public class VitalTransformer implements Transformer {
             }
         }
 
-        String vitalPid = fedora.getAPIM().ingest(template,
-                Strings.FOXML_VERSION,
-                "ReDBox creating new object: '" + oid + "'");
+        IngestResponse response = FedoraClient.ingest()
+                .content(template)
+                .format(Strings.FOXML_VERSION)
+                .logMessage("ReDBox creating new object: '" + oid + "'")
+                .execute();
+        String vitalPid = response.getPid();
         log.info("New VITAL PID: '{}'", vitalPid);
         return vitalPid;
     }
@@ -703,14 +723,14 @@ public class VitalTransformer implements Transformer {
     /**
      * Method responsible for arranging submissions to VITAL to store our
      * datastreams.
-     * 
-     * @param fedora An instantiated fedora client
-     * @param object The Object to submit
+     *
+     * @param fedora   An instantiated fedora client
+     * @param object   The Object to submit
      * @param vitalPid The VITAL PID to use
      * @throws Exception on any errors
      */
     private void processDatastreams(FedoraClient fedora, DigitalObject object,
-            String vitalPid) throws Exception {
+                                    String vitalPid) throws Exception {
         int sent = 0;
 
         // Each payload we care about needs to be sent
@@ -786,14 +806,14 @@ public class VitalTransformer implements Transformer {
     /**
      * Similar to sendToVital(), but this method is specifically looking for
      * attachments distributed throughout the system.
-     * 
-     * @param fedora An instantiated fedora client
-     * @param object The Object to submit
+     *
+     * @param fedora   An instantiated fedora client
+     * @param object   The Object to submit
      * @param vitalPid The VITAL PID to use
      * @throws Exception on any errors
      */
     private void processAttachments(FedoraClient fedora, DigitalObject object,
-            String vitalPid) throws Exception {
+                                    String vitalPid) throws Exception {
         ByteArrayOutputStream out = null;
         ByteArrayInputStream in = null;
         SolrResult result;
@@ -952,7 +972,7 @@ public class VitalTransformer implements Transformer {
 
     /**
      * For the given digital object, find the Fascinator package inside.
-     * 
+     *
      * @param object The object with a package
      * @return String The payload ID of the package, NULL if not found
      * @throws Exception if any errors occur
@@ -969,15 +989,15 @@ public class VitalTransformer implements Transformer {
     /**
      * For the given mime type, ensure that the array of alternate identifiers
      * is correct. If identifiers are missing they will be added to the array.
-     * 
+     *
      * @param oldArray The old array of identifiers
      * @param mimeType The mime type of the datastream
-     * @param count The attachment count, to use in the format call
+     * @param count    The attachment count, to use in the format call
      * @return String[] An array containing all of the old IDs with any that
-     *         were missing for the mime type
+     * were missing for the mime type
      */
     private String[] resolveAltIds(String[] oldArray, String mimeType,
-            int count) {
+                                   int count) {
         // First, find the valid list we want
         String key = null;
         for (String mimeTest : attachAltIds.keySet()) {
@@ -1014,8 +1034,8 @@ public class VitalTransformer implements Transformer {
     /**
      * Check the array for the new element, and if not found, generate a new
      * array containing all of the old elements plus the new.
-     * 
-     * @param oldArray The old array of data
+     *
+     * @param oldArray   The old array of data
      * @param newElement The new element we want
      * @return String[] An array containing all of the old data
      */
@@ -1042,25 +1062,25 @@ public class VitalTransformer implements Transformer {
     /**
      * Take care of the actual transmission to VITAL. This method will select
      * the appropriate transmission method based on:
-     * 
+     * <p>
      * 1) If VITAL has already seen the datastream before
      * 2) If the data is XML or not
-     * 
-     * @param fedora The fedora client to use in transmission
-     * @param ourObject The DigitalObject in storage
-     * @param ourPid The payload in the object to send
-     * @param vitalPid The object in fedora we are targeting
-     * @param dsId The datastream ID in fedora to create or overwrite
-     * @param label The label to use
-     * @param mimeType The mime type of the content we are sending
+     *
+     * @param fedora       The fedora client to use in transmission
+     * @param ourObject    The DigitalObject in storage
+     * @param ourPid       The payload in the object to send
+     * @param vitalPid     The object in fedora we are targeting
+     * @param dsId         The datastream ID in fedora to create or overwrite
+     * @param label        The label to use
+     * @param mimeType     The mime type of the content we are sending
      * @param controlGroup The control group value to use if the object is new
-     * @param status The status to use in fedora if the object is new
+     * @param status       The status to use in fedora if the object is new
      * @throws Exception if any errors occur
      */
     private void sendToVital(FedoraClient fedora, DigitalObject ourObject,
-            String ourPid, String vitalPid, String dsId, String[] altIds,
-            String label, String mimeType, String controlGroup, String status,
-            boolean versionable) throws Exception {
+                             String ourPid, String vitalPid, String dsId, String[] altIds,
+                             String label, String mimeType, String controlGroup, String status,
+                             boolean versionable) throws Exception {
         // We might need to cleanup a file upload if things go wrong
         File tempFile = null;
         String tempURI = null;
@@ -1174,9 +1194,9 @@ public class VitalTransformer implements Transformer {
     /**
      * Trivial wrapper to close Closeable objects with an awareness that they
      * may not have been instantiated, or may have already been closed.
-     * 
+     * <p>
      * Typically this would be a Stream, either in or out.
-     * 
+     *
      * @param toClose The object to close
      */
     private void close(Closeable toClose) {
@@ -1191,14 +1211,14 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Test for the existence of a given datastream in VITAL.
-     * 
-     * @param fedora An instantiated fedora client
+     *
+     * @param fedora   An instantiated fedora client
      * @param vitalPid The VITAL PID to use
-     * @param dsPid The datastream ID on the object
+     * @param dsPid    The datastream ID on the object
      * @returns boolean True is found, False if not found or there are errors
      */
     private boolean datastreamExists(FedoraClient fedora, String vitalPid,
-            String dsPid) {
+                                     String dsPid) {
         try {
             // Some options:
             // * getAPIA().listDatastreams... seems best
@@ -1220,15 +1240,15 @@ public class VitalTransformer implements Transformer {
     /**
      * Find and return any alternate identifiers already in use in fedora for
      * the given datastream.
-     * 
-     * @param fedora An instantiated fedora client
+     *
+     * @param fedora   An instantiated fedora client
      * @param vitalPid The VITAL PID to use
-     * @param dsPid The datastream ID on the object
+     * @param dsPid    The datastream ID on the object
      * @returns String[] An array or String identifiers, will be empty if
-     *          datastream does not exist.
+     * datastream does not exist.
      */
     private String[] getAltIds(FedoraClient fedora, String vitalPid,
-            String dsPid) {
+                               String dsPid) {
         Datastream ds = getDatastream(fedora, vitalPid, dsPid);
         if (ds != null) {
             return ds.getAltIDs();
@@ -1240,14 +1260,14 @@ public class VitalTransformer implements Transformer {
      * Get the indicated datastream from VITAL. This method pre-supposes that
      * the datastream does in fact exist. Call datastreamExists() first to
      * confirm.
-     * 
-     * @param fedora An instantiated fedora client
+     *
+     * @param fedora   An instantiated fedora client
      * @param vitalPid The VITAL PID to use
-     * @param dsPid The datastream ID on the object
+     * @param dsPid    The datastream ID on the object
      * @returns Datastream The datastream requested, null if not found
      */
     private Datastream getDatastream(FedoraClient fedora, String vitalPid,
-            String dsPid) {
+                                     String dsPid) {
         try {
             return fedora.getAPIM().getDatastream(vitalPid, dsPid, null);
         } catch (Exception ex) {
@@ -1258,9 +1278,9 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Build a Log entry to use in Fedora. Replace all the template placeholders
-     * 
+     *
      * @param object The Object being submitted
-     * @param pid The PID in our system
+     * @param pid    The PID in our system
      */
     private String fedoraLogEntry(DigitalObject object, String pid) {
         String message = fedoraMessageTemplate.replace("[[PID]]", pid);
@@ -1270,14 +1290,14 @@ public class VitalTransformer implements Transformer {
     /**
      * Build an error message detailing an interrupted upload. Some (or none) of
      * the intended list of payloads did not transfer to VITAL correctly.
-     * 
-     * @param pid The PID in our system for which the failure occurred.
-     * @param count The number of successful PIDs sent before the failure.
-     * @param total The total number of PIDs that were intended to be sent.
+     *
+     * @param pid      The PID in our system for which the failure occurred.
+     * @param count    The number of successful PIDs sent before the failure.
+     * @param total    The total number of PIDs that were intended to be sent.
      * @param vitalPid The PID for the entire object in VITAL.
      */
     private String partialUploadErrorMessage(String pid, int count, int total,
-            String vitalPid) {
+                                             String vitalPid) {
         String message = "Error submitting payload '" + pid + "' to VITAL. ";
         message += count + " of " + total + " payloads where successfully";
         message += " sent to VITAL before this error occurred.";
@@ -1287,9 +1307,9 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Stream the data out of storage to our temp directory.
-     * 
+     *
      * @param object Our digital object.
-     * @param pid The payload ID to retrieve.
+     * @param pid    The payload ID to retrieve.
      * @return File The file creating in the temp directory
      * @throws Exception on any errors
      */
@@ -1331,9 +1351,9 @@ public class VitalTransformer implements Transformer {
 
     /**
      * Retrieve the payload from storage and return as a byte array.
-     * 
+     *
      * @param object Our digital object.
-     * @param pid The payload ID to retrieve.
+     * @param pid    The payload ID to retrieve.
      * @return byte[] The byte array containing payload data
      * @throws Exception on any errors
      */
@@ -1360,15 +1380,15 @@ public class VitalTransformer implements Transformer {
      * Error handling methods. Will at least log the errors, but also try to
      * send emails if configured to do so, and the data provided indicates it is
      * warranted.
-     * 
+     * <p>
      * If an OID and Title are provided it indicates an Object we are confident
      * should have been sent to VITAL, so emails will be sent out (if
      * configured).
-     * 
+     *
      * @param message Our own error message
-     * @param ex Any exception that has been thrown (OPTIONAL)
-     * @param oid The OID of our Object (OPTIONAL)
-     * @param title The title of our Object (OPTIONAL)
+     * @param ex      Any exception that has been thrown (OPTIONAL)
+     * @param oid     The OID of our Object (OPTIONAL)
+     * @param title   The title of our Object (OPTIONAL)
      */
     private void error(String message) throws TransformerException {
         error(message, null, null, null);
@@ -1439,7 +1459,7 @@ public class VitalTransformer implements Transformer {
 
     /****
      * Avoid use of duplicate String literals
-     * 
+     *
      */
     private static class Strings
             extends com.googlecode.fascinator.common.Strings {
@@ -1448,7 +1468,7 @@ public class VitalTransformer implements Transformer {
         public static String CONFIG_SERVER = "server";
         // Default values
         public static String FEDORA_TEST_PID = "fedora-system:FedoraObject-3.0";
-        public static String FEDORA_VERSION_TEST = "3.";
+        public static String FEDORA_VERSION_TEST = "3.z";
         public static String FOXML_VERSION =
                 "info:fedora/fedora-system:FOXML-1.1";
         public static String DEFAULT_EMAIL_SUBJECT = "VITAL Transformer error";
