@@ -38,12 +38,17 @@ import com.googlecode.fascinator.common.messaging.MessagingServices;
 import com.googlecode.fascinator.common.solr.SolrDoc;
 import com.googlecode.fascinator.common.solr.SolrResult;
 import com.yourmediashelf.fedora.client.FedoraClient;
+import com.yourmediashelf.fedora.client.FedoraClientException;
 import com.yourmediashelf.fedora.client.FedoraCredentials;
 import com.yourmediashelf.fedora.client.response.*;
+import com.yourmediashelf.fedora.generated.management.DatastreamProfile;
+import com.yourmediashelf.fedora.generated.access.DatastreamType;
+
 import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.CollectionUtils;
 
 import java.io.*;
 import java.net.MalformedURLException;
@@ -1206,24 +1211,21 @@ public class VitalTransformer implements Transformer {
      * @param dsPid    The datastream ID on the object
      * @returns boolean True is found, False if not found or there are errors
      */
-    private boolean datastreamExists(FedoraClient fedora, String vitalPid,
+    private boolean datastreamExists(FedoraClient fedoraClient, String vitalPid,
                                      String dsPid) {
+        boolean found = false;
         try {
-            // Some options:
-            // * getAPIA().listDatastreams... seems best
-            // * getAPIM().getDatastream... causes Exceptions against new IDs
-            // * getAPIM().getDatastreams... is limited to a single state
-            DatastreamDef[] streams = fedora.getAPIA().listDatastreams(
-                    vitalPid, null);
-            for (DatastreamDef stream : streams) {
-                if (stream.getID().equals(dsPid)) {
-                    return true;
+            ListDatastreamsResponse listDatastreams = FedoraClient.listDatastreams(vitalPid).execute(fedoraClient);
+            for (DatastreamType datastreamType : listDatastreams.getDatastreams()) {
+                if (datastreamType.getDsid().equals(dsPid)) {
+                    found = true;
+                    break;
                 }
             }
         } catch (Exception ex) {
             log.error("API Query error: ", ex);
         }
-        return false;
+        return found;
     }
 
     /**
@@ -1238,11 +1240,15 @@ public class VitalTransformer implements Transformer {
      */
     private String[] getAltIds(FedoraClient fedora, String vitalPid,
                                String dsPid) {
-        Datastream ds = getDatastream(fedora, vitalPid, dsPid);
-        if (ds != null) {
-            return ds.getAltIDs();
+        try {
+            DatastreamProfileResponse datastreamProfileResponse = getDatastream(fedora, vitalPid, dsPid);
+            DatastreamProfile datastreamProfile = datastreamProfileResponse.getDatastreamProfile();
+            List<String> dsAltIDs = datastreamProfile.getDsAltID();
+            return dsAltIDs.toArray(new String[dsAltIDs.size()]);
+        } catch (FedoraClientException e) {
+            log.error("Get data stream profile error", e);
+            return new String[]{};
         }
-        return new String[]{};
     }
 
     /**
@@ -1255,10 +1261,10 @@ public class VitalTransformer implements Transformer {
      * @param dsPid    The datastream ID on the object
      * @returns Datastream The datastream requested, null if not found
      */
-    private Datastream getDatastream(FedoraClient fedora, String vitalPid,
-                                     String dsPid) {
+    private DatastreamProfileResponse getDatastream(FedoraClient fedoraClient, String vitalPid,
+                                                String dsPid) {
         try {
-            return fedora.getAPIM().getDatastream(vitalPid, dsPid, null);
+            return FedoraClient.getDatastream(vitalPid, dsPid).execute(fedoraClient);
         } catch (Exception ex) {
             log.error("API Query error: ", ex);
             return null;
