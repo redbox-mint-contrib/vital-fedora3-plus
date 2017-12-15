@@ -39,10 +39,7 @@ import com.googlecode.fascinator.common.solr.SolrDoc;
 import com.googlecode.fascinator.common.solr.SolrResult;
 import com.yourmediashelf.fedora.client.FedoraClient;
 import com.yourmediashelf.fedora.client.FedoraCredentials;
-import com.yourmediashelf.fedora.client.response.FedoraResponse;
-import com.yourmediashelf.fedora.client.response.GetObjectProfileResponse;
-import com.yourmediashelf.fedora.client.response.IngestResponse;
-import com.yourmediashelf.fedora.client.response.ModifyDatastreamResponse;
+import com.yourmediashelf.fedora.client.response.*;
 import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
@@ -55,7 +52,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.yourmediashelf.fedora.client.FedoraClient.getObjectProfile;
-import static com.yourmediashelf.fedora.client.FedoraClient.modifyObject;
 
 //import org.fcrepo.client.FedoraClient;
 ////import org.fcrepo.server.management.FedoraAPIM;
@@ -1075,12 +1071,12 @@ public class VitalTransformer implements Transformer {
      * @param label        The label to use
      * @param mimeType     The mime type of the content we are sending
      * @param controlGroup The control group value to use if the object is new
-     * @param status       The status to use in fedora if the object is new
+     * @param state        The status to use in fedora if the object is new
      * @throws Exception if any errors occur
      */
     private void sendToVital(FedoraClient fedoraClient, DigitalObject ourObject,
                              String ourPid, String vitalPid, String dsId, String[] altIds,
-                             String label, String mimeType, String controlGroup, String status,
+                             String label, String mimeType, String controlGroup, String state,
                              boolean versionable) throws Exception {
         // We might need to cleanup a file upload if things go wrong
         File tempFile = null;
@@ -1090,7 +1086,7 @@ public class VitalTransformer implements Transformer {
             // Find out if it has been sent before
             if (datastreamExists(fedoraClient, vitalPid, dsId)) {
                 log.info("Updating existing datastream: '{}'", dsId);
-                log.debug("LABEL: '" + label + "', STATUS: '" + status
+                log.debug("LABEL: '" + label + "', STATE: '" + state
                         + "', GROUP: '" + controlGroup + "'");
 
                 /**********************************
@@ -1106,7 +1102,7 @@ public class VitalTransformer implements Transformer {
                             .dsLabel(label)
                             .mimeType(mimeType)
                             .content(data)
-                            .logMessage( fedoraLogEntry(ourObject, ourPid))
+                            .logMessage(fedoraLogEntry(ourObject, ourPid))
                             .execute(fedoraClient);
                     log.debug("Checking modify datastream response status: {}", response.getStatus());
                     /**********************************
@@ -1123,21 +1119,19 @@ public class VitalTransformer implements Transformer {
                     }
 
                     // Upload out data first
-                    tempURI = fedoraClient.uploadFile(tempFile);
+                    UploadResponse uploadResponse = FedoraClient.upload(tempFile)
+                            .execute(fedoraClient);
+                    tempURI = uploadResponse.getUploadLocation();
 
                     // Modify the existing datastream
-                    fedora.getAPIM().modifyDatastreamByReference(
-                            vitalPid, // Object PID in VITAL
-                            dsId,     // The dsID we have configured
-                            altIds,   // Alt IDs... not using
-                            label,    // Label
-                            mimeType, // MIME type
-                            null,     // Format URI
-                            tempURI,  // Datastream Location
-                            null,     // ChecksumType
-                            null,     // Checksum
-                            fedoraLogEntry(ourObject, ourPid), // Log message
-                            true);    // Force update
+                    ModifyDatastreamResponse response = FedoraClient.modifyDatastream(vitalPid, dsId)
+                            .altIDs(Arrays.asList(altIds))
+                            .dsLabel(label)
+                            .mimeType(mimeType)
+                            .dsLocation(tempURI)
+                            .logMessage(fedoraLogEntry(ourObject, ourPid))
+                            .execute(fedoraClient);
+                    log.debug("Checking modify datastream response status: {}", response.getStatus());
                 }
 
                 /**********************************
@@ -1145,7 +1139,7 @@ public class VitalTransformer implements Transformer {
                  */
             } else {
                 log.info("Creating new datastream: '{}'", dsId);
-                log.debug("LABEL: '" + label + "', STATUS: '" + status
+                log.debug("LABEL: '" + label + "', STATE: '" + state
                         + "', GROUP: '" + controlGroup + "'");
 
                 // Get our data
@@ -1157,23 +1151,22 @@ public class VitalTransformer implements Transformer {
                 }
 
                 // Upload out data first
-                tempURI = fedora.uploadFile(tempFile);
+                UploadResponse uploadResponse = FedoraClient.upload(tempFile)
+                        .execute(fedoraClient);
+                tempURI = uploadResponse.getUploadLocation();
 
                 // A new datastream
-                fedora.getAPIM().addDatastream(
-                        vitalPid,     // Object PID in VITAL
-                        dsId,         // The dsID we have configured
-                        altIds,       // Alt IDs... not using
-                        label,        // Label
-                        versionable,  // Versionable
-                        mimeType,     // MIME type
-                        null,         // Format URI
-                        tempURI,      // Datastream Location
-                        controlGroup, // Control Group
-                        status,       // State
-                        null,         // ChecksumType
-                        null,         // Checksum
-                        fedoraLogEntry(ourObject, ourPid)); // Log message
+                AddDatastreamResponse addDatastreamResponse = FedoraClient.addDatastream(vitalPid, dsId)
+                        .altIDs(Arrays.asList(altIds))
+                        .dsLabel(label)
+                        .versionable(versionable)
+                        .mimeType(mimeType)
+                        .dsLocation(tempURI)
+                        .controlGroup(controlGroup)
+                        .dsState(state)
+                        .logMessage(fedoraLogEntry(ourObject, ourPid))
+                        .execute(fedoraClient);
+                log.debug("Checking add datastream response status: {}", addDatastreamResponse.getStatus());
             }
 
         } catch (Exception ex) {
