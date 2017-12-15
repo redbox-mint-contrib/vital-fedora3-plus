@@ -42,6 +42,7 @@ import com.yourmediashelf.fedora.client.FedoraCredentials;
 import com.yourmediashelf.fedora.client.response.FedoraResponse;
 import com.yourmediashelf.fedora.client.response.GetObjectProfileResponse;
 import com.yourmediashelf.fedora.client.response.IngestResponse;
+import com.yourmediashelf.fedora.client.response.ModifyDatastreamResponse;
 import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
@@ -658,9 +659,9 @@ public class VitalTransformer implements Transformer {
                         .state("A")
                         .label(cutTitle)
                         .logMessage("ReDBox activating object: '" + oid + "'")
-                        .execute();
+                        .execute(fedoraClient);
                 log.info("Checking modify response status is 200 and state is A...");
-                GetObjectProfileResponse op = getObjectProfile(vitalPid).execute();
+                GetObjectProfileResponse op = getObjectProfile(vitalPid).execute(fedoraClient);
                 log.info("PID: {}, Status: {}, State: {}", op.getPid(), response.getStatus(), op.getState());
                 // Record this so we don't do it again
                 metadata.setProperty(Strings.PROP_VITAL_ACTIVE, "true");
@@ -714,7 +715,7 @@ public class VitalTransformer implements Transformer {
                 .content(template)
                 .format(Strings.FOXML_VERSION)
                 .logMessage("ReDBox creating new object: '" + oid + "'")
-                .execute();
+                .execute(fedora);
         String vitalPid = response.getPid();
         log.info("New VITAL PID: '{}'", vitalPid);
         return vitalPid;
@@ -1077,7 +1078,7 @@ public class VitalTransformer implements Transformer {
      * @param status       The status to use in fedora if the object is new
      * @throws Exception if any errors occur
      */
-    private void sendToVital(FedoraClient fedora, DigitalObject ourObject,
+    private void sendToVital(FedoraClient fedoraClient, DigitalObject ourObject,
                              String ourPid, String vitalPid, String dsId, String[] altIds,
                              String label, String mimeType, String controlGroup, String status,
                              boolean versionable) throws Exception {
@@ -1087,7 +1088,7 @@ public class VitalTransformer implements Transformer {
 
         try {
             // Find out if it has been sent before
-            if (datastreamExists(fedora, vitalPid, dsId)) {
+            if (datastreamExists(fedoraClient, vitalPid, dsId)) {
                 log.info("Updating existing datastream: '{}'", dsId);
                 log.debug("LABEL: '" + label + "', STATUS: '" + status
                         + "', GROUP: '" + controlGroup + "'");
@@ -1098,21 +1099,16 @@ public class VitalTransformer implements Transformer {
                  */
                 if (mimeType.equals("text/xml")) {
                     // Updates on inline XML must be by value
-                    byte[] data = getBytes(ourObject, ourPid);
+                    String data = digitalObjectToString(ourObject, ourPid);
                     // Modify the existing datastream
-                    fedora.getAPIM().modifyDatastreamByValue(
-                            vitalPid, // Object PID in VITAL
-                            dsId,     // The dsID we have configured
-                            altIds,   // Alt IDs... not using
-                            label,    // Label
-                            mimeType, // MIME type
-                            null,     // Format URI
-                            data,     // Our XML data
-                            null,     // ChecksumType
-                            null,     // Checksum
-                            fedoraLogEntry(ourObject, ourPid), // Log message
-                            true);    // Force update
-
+                    ModifyDatastreamResponse response = FedoraClient.modifyDatastream(vitalPid, dsId)
+                            .altIDs(Arrays.asList(altIds))
+                            .dsLabel(label)
+                            .mimeType(mimeType)
+                            .content(data)
+                            .logMessage( fedoraLogEntry(ourObject, ourPid))
+                            .execute(fedoraClient);
+                    log.debug("Checking modify datastream response status: {}", response.getStatus());
                     /**********************************
                      * 1) Submission to overwrite EXISTING datastreams in VITAL
                      * 2) Must be performed by reference if not XML
@@ -1127,7 +1123,7 @@ public class VitalTransformer implements Transformer {
                     }
 
                     // Upload out data first
-                    tempURI = fedora.uploadFile(tempFile);
+                    tempURI = fedoraClient.uploadFile(tempFile);
 
                     // Modify the existing datastream
                     fedora.getAPIM().modifyDatastreamByReference(
@@ -1357,22 +1353,20 @@ public class VitalTransformer implements Transformer {
      * @return byte[] The byte array containing payload data
      * @throws Exception on any errors
      */
-    private byte[] getBytes(DigitalObject object, String pid) throws Exception {
+    private String digitalObjectToString(DigitalObject object, String pid) throws Exception {
         // These can happily throw exceptions higher
         Payload payload = object.getPayload(pid);
         InputStream in = payload.open();
-        byte[] result = null;
+
+        String result = null;
 
         // But here, the payload must receive
         // a close before throwing the error
         try {
-            result = IOUtils.toByteArray(in);
-        } catch (Exception ex) {
-            throw ex;
+            result = IOUtils.toString(in);
         } finally {
             payload.close();
         }
-
         return result;
     }
 
