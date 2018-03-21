@@ -10,7 +10,7 @@
     <parent>
         <groupId>com.googlecode.redbox-mint</groupId>
         <artifactId>redbox-project</artifactId>
-        <version>1.8</version>
+        <version>1.10</version>
     </parent>
     <dependencies>
         <!-- Fascinator -->
