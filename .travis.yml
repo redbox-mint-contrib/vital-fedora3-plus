@@ -3,10 +3,13 @@ language: java
 services:
 - docker
 before_install:
-- mkdir /tmp/build
+- mkdir -p /tmp/build $HOME/.m2
 - docker pull qcifengineering/redbox-builder
-- docker run -v /tmp/build:/build -e "CLONEPATH=https://github.com/redbox-mint-contrib/vital-fedora3-plus.git"
+- docker run -v /tmp/build:/build -v $HOME/.m2:/m2_repo -e "CLONEPATH=https://github.com/redbox-mint-contrib/vital-fedora3-plus.git"
   qcifengineering/redbox-builder
+cache:
+  directories:
+  - $HOME/.m2
 install: true
 script: true
 after_success:
