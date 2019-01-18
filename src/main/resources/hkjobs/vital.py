@@ -1,4 +1,5 @@
 import xml
+
 from com.googlecode.fascinator.api.indexer import SearchRequest
 from com.googlecode.fascinator.common import JsonObject
 from com.googlecode.fascinator.common.messaging import MessagingServices
@@ -14,6 +15,7 @@ from java.lang import Exception
 from java.lang import String
 from org.dom4j import DocumentFactory
 from org.dom4j.io import SAXReader
+
 
 class VitalData:
     def __init__(self):
@@ -74,6 +76,14 @@ class VitalData:
             # And get its metadata
             metadata = object.getMetadata()
             vitalPid = metadata.getProperty("vitalPid")
+            pidProperty = metadata.getProperty(self.pidProperty)
+            self.log.debug("Object '{}' has pidProperty '{}'", id, pidProperty)
+
+            # Bug here: ReDBox always reindex Vital, even if not updated
+            if not pidProperty is None:
+                self.log.debug("Object '{}', pidProperty '{}' has already been published. Ignore.", id, pidProperty)
+                return True
+
             if vitalPid is None:
                 self.log.error("Object '{}' has invalid VITAL data", id)
                 self.throw_error("Object '%s' has invalid VITAL data" % id)

@@ -33,6 +33,7 @@ import com.googlecode.fascinator.api.transformer.TransformerException;
 import com.googlecode.fascinator.common.JsonObject;
 import com.googlecode.fascinator.common.JsonSimple;
 import com.googlecode.fascinator.common.JsonSimpleConfig;
+import com.googlecode.fascinator.common.StorageDataUtil;
 import com.googlecode.fascinator.common.messaging.MessagingException;
 import com.googlecode.fascinator.common.messaging.MessagingServices;
 import com.googlecode.fascinator.common.solr.SolrDoc;
@@ -44,6 +45,8 @@ import com.yourmediashelf.fedora.client.response.*;
 import com.yourmediashelf.fedora.generated.access.DatastreamType;
 import com.yourmediashelf.fedora.generated.management.DatastreamProfile;
 import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.json.simple.JSONArray;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,6 +126,10 @@ public class VitalTransformer implements Transformer {
      * Wait conditions
      */
     private List<String> waitProperties;
+
+    private Map<String, String> redirectsConfig;
+
+    private List<String> redirectsList;
 
     /**
      * Gets an identifier for this type of plugin. This should be a simple
@@ -253,17 +260,15 @@ public class VitalTransformer implements Transformer {
             throw new TransformerException(
                     "No datastreams configured to export!");
         }
+
+        // And redirect state
+        initRedirectConfig(config);
+
         // And attachment handling
+        String attachmentsConfigKey = "attachments";
         JsonSimple attachmentsConfig = new JsonSimple(
-                config.getObject("attachments"));
-        attachDs = attachmentsConfig.getString("ATTACHMENT%02d", "dsID");
-        Pattern p = Pattern.compile("%\\d*d");
-        Matcher m = p.matcher(attachDs);
-        if (!m.find()) {
-            throw new TransformerException(
-                    "'*/attachments/dsId' must have a format placeholder for incrementing integer, eg. '%d' or '%02d'. The value provided ('"
-                            + attachDs + "') is invalid");
-        }
+                config.getObject(attachmentsConfigKey));
+        attachDs = patternMatchConfig(attachmentsConfig, "attachment");
         attachStatusField = attachmentsConfig.getString(null, "statusField");
         attachStatuses = getStringMap(attachmentsConfig, "status");
         attachLabelField = attachmentsConfig.getString(null, "labelField");
@@ -280,7 +285,7 @@ public class VitalTransformer implements Transformer {
             throw new TransformerException("Error parsing attachment JSON", ex);
         }
         // Use the base object for iteration
-        JsonObject objAltIds = json.getObject("attachments", "altIds");
+        JsonObject objAltIds = json.getObject(attachmentsConfigKey, "altIds");
         // And the library for access methods
         JsonSimple altIds = new JsonSimple(objAltIds);
         for (Object oKey : objAltIds.keySet()) {
@@ -388,13 +393,63 @@ public class VitalTransformer implements Transformer {
         valid = true;
     }
 
+    private void initRedirectConfig(JsonSimpleConfig config) throws TransformerException {
+        // And redirect state
+        try {
+            String key = "redirects";
+            String dsKey = "dsID";
+            redirectsList = config.getStringList(key, "locationFields");
+            if (redirectsList == null || redirectsList.isEmpty()) {
+                log.warn("No redirects config found. Ignoring...");
+                return;
+            }
+            log.debug("Redirects list is: {}", redirectsList.toString());
+            redirectsConfig = getStringMap(config, key);
+            String pattern = redirectsConfig.remove(dsKey);
+            if (pattern != null) {
+                redirectsConfig.put("redirectDs", patternMatchConfig(config, "redirect"));
+            }
+            addDefaultToMap(redirectsConfig, "status", "A");
+            addDefaultToMap(redirectsConfig, "controlGroup", "R");
+            addDefaultToMap(redirectsConfig, "versionable", "false");
+            addDefaultToMap(redirectsConfig, "retainIds", "false");
+            addDefaultToMap(redirectsConfig, "mimeType", "application/octet-stream");
+            log.debug("redirects config is: {}", redirectsConfig.toString());
+        } catch (Exception e) {
+            throw new TransformerException("Problem with setting up redirects config", e);
+        }
+
+    }
+
+    private void addDefaultToMap(Map<String, String> map, String key, String defaultValue) {
+        String value = map.get(key);
+        if (value == null) {
+            map.put(key, defaultValue);
+        }
+    }
+
+    private String patternMatchConfig(JsonSimple config, String key) throws TransformerException {
+        // And attachment handling
+        String defaultPattern = key.toUpperCase() + "%02d";
+        String pattern = config.getString(defaultPattern, "dsID");
+        Pattern p = Pattern.compile("%\\d*d");
+        Matcher m = p.matcher(pattern);
+        if (!m.find()) {
+            throw new TransformerException(
+                    "'*/" + key + "/dsId' must have a format placeholder for incrementing integer, eg. '%d' or '%02d'. The value provided ('"
+                            + pattern + "') is invalid");
+        }
+        return pattern;
+    }
+
+
     /**
      * Trivial wrapper on the JsonConfigHelper getMap() method to cast all map
      * entries to strings if appropriate and return.
      *
      * @param json The json object to query.
      * @param path The path on which the map is found.
-     * @return Map<String, String>: The object map cast to Strings
+     * @return Map<String       ,               String>: The object map cast to Strings
      */
     private Map<String, String> getStringMap(JsonSimple json, String... path) {
         Map<String, String> response = new LinkedHashMap<String, String>();
@@ -406,9 +461,17 @@ public class VitalTransformer implements Transformer {
             Object value = object.get(key);
             if (value instanceof String) {
                 response.put((String) key, (String) value);
+            } else if (value == Boolean.TRUE) {
+                response.put((String) key, Boolean.toString((Boolean) value));
             }
+
         }
         return response;
+    }
+
+
+    private FedoraClient fedoraConnect() throws TransformerException {
+        return fedoraConnect(false);
     }
 
     /**
@@ -422,10 +485,6 @@ public class VitalTransformer implements Transformer {
      * @return FedoraClient The client used to connect to the API
      * @throws TransformerException if there was an error
      */
-    private FedoraClient fedoraConnect() throws TransformerException {
-        return fedoraConnect(false);
-    }
-
     private FedoraClient fedoraConnect(boolean firstConnection)
             throws TransformerException {
         FedoraClient fedoraClient = null;
@@ -438,6 +497,7 @@ public class VitalTransformer implements Transformer {
             if (firstConnection) {
                 log.info("Connected to FEDORA : '{}'", fedoraUrl);
             }
+            log.info("This plugin is designed to work only with Fedora versions 3.x");
             // Make sure we can get the server version
             String version = fedoraClient.getServerVersion();
             // Version cutout
@@ -762,7 +822,6 @@ public class VitalTransformer implements Transformer {
 
             // MIME Type
             Payload payload = null;
-            String mimeType = null;
             try {
                 payload = object.getPayload(realPid);
             } catch (StorageException ex) {
@@ -771,7 +830,10 @@ public class VitalTransformer implements Transformer {
                 throw new Exception(message + "\n\nError accessing payload '"
                         + realPid + "' : ", ex);
             }
-            mimeType = payload.getContentType();
+            String mimeType = null;
+            if (!controlGroup.equals("R")) {
+                mimeType = payload.getContentType();
+            }
             // Default to binary data
             if (mimeType == null) {
                 mimeType = "application/octet-stream";
@@ -785,9 +847,9 @@ public class VitalTransformer implements Transformer {
                         pids.size(), vitalPid);
                 throw new Exception(message, ex);
             }
-
             // Increase our counter
             sent++;
+
         } // End for loop
 
         // Datastreams are taken care of, now handle attachments
@@ -796,6 +858,91 @@ public class VitalTransformer implements Transformer {
         } catch (Exception ex) {
             throw new Exception("Error processing attachments: ", ex);
         }
+
+        // Redirects depend on .tfpackage being processed so process after datastreams
+        try {
+            processRedirects(fedora, object, vitalPid);
+        } catch (Exception ex) {
+            throw new Exception("Error processing attachments: ", ex);
+        }
+
+    }
+
+    /**
+     * Looking for redirects from 'tfpackage'.
+     *
+     * @param fedoraClient  An instantiated fedora client
+     * @param digitalObject The Object to submit
+     * @param vitalPid      The VITAL PID to use
+     * @throws Exception on any errors
+     */
+    private void processRedirects(FedoraClient fedoraClient, DigitalObject digitalObject,
+                                  String vitalPid) throws Exception {
+        if (redirectsConfig == null || redirectsList == null) {
+            log.info("No redirects present in tfpackage. Skipping...");
+            return;
+        }
+        List<String> redirects = new ArrayList<>();
+        StorageDataUtil storageDataUtil = new StorageDataUtil();
+        String tfPid = getPackagePid(digitalObject);
+        Payload payload = digitalObject.getPayload(tfPid);
+        JsonSimple jsonSimple = new JsonSimple(payload.open());
+        if (jsonSimple == null) {
+            throw new TransformerException("Unable to open payload for process redirects.");
+        }
+        for (String nextRedirectKey : redirectsList) {
+            Object path = jsonSimple.getPath(nextRedirectKey);
+            if (path == null) {
+                List<JsonObject> packageRedirects = storageDataUtil.getJavaList(jsonSimple, nextRedirectKey);
+                if (packageRedirects.size() != 0) {
+                    for (JsonObject nextObjects : packageRedirects) {
+                        Object nextRedirect = nextObjects.get("dc:identifier");
+                        if (nextRedirect instanceof String) {
+                            redirects.add((String) nextRedirect);
+                            log.debug("added redirect: {}", (String) nextRedirect);
+                        }
+                    }
+                } else {
+                    log.debug("No value found for {}", nextRedirectKey);
+                }
+            } else {
+                //try just as string
+                String nextValue = storageDataUtil.get(jsonSimple, nextRedirectKey);
+                if (StringUtils.isNotBlank(nextValue)) {
+                    redirects.add(nextValue);
+                } else {
+                    log.debug("No value found for {}", nextValue);
+                }
+            }
+        }
+        log.debug("Redirects are : %s", Arrays.toString(redirects.toArray()));
+        int dsIdSuffix = 0;
+        String redirectDsPattern = redirectsConfig.get("redirectDs");
+        for (String nextRedirect : redirects) {
+            log.debug("sending next redirect to vital: %s", nextRedirect);
+            String newId = String.format(redirectDsPattern, ++dsIdSuffix);
+            // Make sure it's not in use already either by us
+            while (datastreamExists(fedoraClient, vitalPid, newId)) {
+                newId = String.format(attachDs, ++dsIdSuffix);
+            }
+            String dsId = newId;
+            String vitalOrder = String.valueOf(dsIdSuffix);
+            String label = redirectsConfig.get("label");
+            if (StringUtils.isBlank(label)) {
+                label = dsId;
+            }
+            String[] altIds = populateAltIds(fedoraClient, vitalPid, dsId, redirectsConfig.get("mimeType"), vitalOrder);
+            try {
+                sendToVital(fedoraClient, digitalObject, nextRedirect, vitalPid, dsId, altIds,
+                        label, redirectsConfig.get("mimeType"), redirectsConfig.get("controlGroup"), redirectsConfig.get("status"),
+                        Boolean.parseBoolean(redirectsConfig.get("versionable")));
+            } catch (Exception ex) {
+                // Throw error
+                throw new Exception("Error uploading redirect: '" + dsId
+                        + "' : ", ex);
+            }
+        }
+
     }
 
     /**
@@ -934,16 +1081,7 @@ public class VitalTransformer implements Transformer {
                 status = attachStatuses.get(statusData);
             }
             // Check for Alt IDs that already exist... if configured to
-            String[] altIds = {};
-            if (attachRetainIds && datastreamExists(fedora, vitalPid, dsId)) {
-                altIds = getAltIds(fedora, vitalPid, dsId);
-                for (String altId : altIds) {
-                    log.debug("Retaining alt ID: '{}' => {}'", dsId, altId);
-                }
-            }
-            altIds = resolveAltIds(altIds, mimeType,
-                    Integer.valueOf(vitalOrder));
-
+            String[] altIds = populateAltIds(fedora, vitalPid, dsId, mimeType, vitalOrder);
             try {
                 sendToVital(fedora, attachment, pid, vitalPid, dsId, altIds,
                         label, mimeType, attachControlGroup, status,
@@ -979,6 +1117,19 @@ public class VitalTransformer implements Transformer {
             }
         }
         return null;
+    }
+
+    private String[] populateAltIds(FedoraClient fedora, String vitalPid, String dsId, String mimeType, String vitalOrder) {
+        String[] altIds = {};
+        if (attachRetainIds && datastreamExists(fedora, vitalPid, dsId)) {
+            altIds = getAltIds(fedora, vitalPid, dsId);
+            for (String altId : altIds) {
+                log.debug("Retaining alt ID: '{}' => {}'", dsId, altId);
+            }
+        }
+        altIds = resolveAltIds(altIds, mimeType,
+                Integer.valueOf(vitalOrder));
+        return altIds;
     }
 
     /**
@@ -1091,7 +1242,7 @@ public class VitalTransformer implements Transformer {
                  * 1) Submission to overwrite EXISTING datastreams in VITAL
                  * 2) Can only be used for XML uploads
                  */
-                if (mimeType.equals("text/xml")) {
+                if (mimeType.equals("text/xml") && !controlGroup.equals("R")) {
                     // Updates on inline XML must be by value
                     String data = digitalObjectToString(ourObject, ourPid);
                     // Modify the existing datastream
@@ -1107,8 +1258,16 @@ public class VitalTransformer implements Transformer {
                      * 1) Submission to overwrite EXISTING datastreams in VITAL
                      * 2) Must be performed by reference if not XML
                      */
+                } else if (controlGroup.equals("R")) {
+                    ModifyDatastreamResponse response = FedoraClient.modifyDatastream(vitalPid, dsId)
+                            .altIDs(Arrays.asList(altIds))
+                            .dsLabel(label)
+                            .dsLocation(ourPid)
+                            .mimeType(mimeType)
+                            .logMessage(fedoraLogEntry(ourObject, ourPid))
+                            .execute(fedoraClient);
+                    log.debug("Checking modify datastream response status: {}", response.getStatus());
                 } else {
-                    // Get our data
                     try {
                         tempFile = getTempFile(ourObject, ourPid);
                     } catch (Exception ex) {
@@ -1140,18 +1299,22 @@ public class VitalTransformer implements Transformer {
                 log.debug("LABEL: '" + label + "', STATE: '" + state
                         + "', GROUP: '" + controlGroup + "'");
 
-                // Get our data
-                try {
-                    tempFile = getTempFile(ourObject, ourPid);
-                } catch (Exception ex) {
-                    throw new Exception("Error caching file to disk '"
-                            + ourObject.getId() + "' : ", ex);
-                }
+                if (!(controlGroup.equals("R"))) {
+                    // Get our data
+                    try {
+                        tempFile = getTempFile(ourObject, ourPid);
+                    } catch (Exception ex) {
+                        throw new Exception("Error caching file to disk '"
+                                + ourObject.getId() + "' : ", ex);
+                    }
 
-                // Upload out data first
-                UploadResponse uploadResponse = FedoraClient.upload(tempFile)
-                        .execute(fedoraClient);
-                tempURI = uploadResponse.getUploadLocation();
+                    // Upload out data first
+                    UploadResponse uploadResponse = FedoraClient.upload(tempFile)
+                            .execute(fedoraClient);
+                    tempURI = uploadResponse.getUploadLocation();
+                } else {
+                    tempURI = ourPid;
+                }
 
                 // A new datastream
                 AddDatastreamResponse addDatastreamResponse = FedoraClient.addDatastream(vitalPid, dsId)
@@ -1167,11 +1330,16 @@ public class VitalTransformer implements Transformer {
                 log.debug("Checking add datastream response status: {}", addDatastreamResponse.getStatus());
             }
 
-        } catch (Exception ex) {
+        } catch (
+                Exception ex)
+
+        {
             // Throw error
             throw new Exception("Error submitting datastream '"
                     + ourObject.getId() + "' : ", ex);
-        } finally {
+        } finally
+
+        {
             if (tempFile != null && tempFile.exists()) {
                 tempFile.delete();
             }
@@ -1286,8 +1454,8 @@ public class VitalTransformer implements Transformer {
      */
     private String partialUploadErrorMessage(String pid, int count, int total,
                                              String vitalPid) {
-        String message = "Error submitting payload '" + pid + "' to VITAL. ";
-        message += count + " of " + total + " payloads where successfully";
+        String message = "Error submitting datastreams '" + pid + "' to VITAL. ";
+        message += count + " of " + total + " datastreams where successfully";
         message += " sent to VITAL before this error occurred.";
         message += " The VITAL PID is '" + vitalPid + "'.";
         return message;
