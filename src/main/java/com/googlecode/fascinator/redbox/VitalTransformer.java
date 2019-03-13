@@ -895,9 +895,11 @@ public class VitalTransformer implements Transformer {
                 if (packageRedirects.size() != 0) {
                     for (JsonObject nextObjects : packageRedirects) {
                         Object nextRedirect = nextObjects.get("dc:identifier");
-                        if (nextRedirect instanceof String) {
+                        if (nextRedirect instanceof String && !((String) nextRedirect).isEmpty()) {
                             redirects.add((String) nextRedirect);
                             log.debug("added redirect: {}", (String) nextRedirect);
+                        } else {
+                            log.debug("skipping empty redirect");
                         }
                     }
                 } else {
@@ -913,11 +915,11 @@ public class VitalTransformer implements Transformer {
                 }
             }
         }
-        log.debug("Redirects are : %s", Arrays.toString(redirects.toArray()));
+        log.debug("Redirects are : {}", redirects.toString());
         int dsIdSuffix = 0;
         String redirectDsPattern = redirectsConfig.get("redirectDs");
         for (String nextRedirect : redirects) {
-            log.debug("sending next redirect to vital: %s", nextRedirect);
+            log.debug("sending next redirect to vital: {}", nextRedirect);
             String newId = String.format(redirectDsPattern, ++dsIdSuffix);
             // Make sure it's not in use already either by us
             while (datastreamExists(fedoraClient, vitalPid, newId)) {
