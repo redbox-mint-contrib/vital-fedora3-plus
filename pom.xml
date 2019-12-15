@@ -118,9 +118,9 @@
         </repository>
     </distributionManagement>
     <scm>
-        <url>scm:git://github.com/redbox-mint-contrib/redbox-vital-transformer-fedora3-plus.git</url>
-        <connection>scm:git://github.com/redbox-mint-contrib/redbox-vital-transformer-fedora3-plus.git</connection>
-        <developerConnection>scm:git:https://github.com/redbox-mint-contrib/redbox-vital-transformer-fedora3-plus.git</developerConnection>
+        <url>https://github.com/redbox-mint-contrib/vital-fedora3-plus</url>
+        <connection>scm:git:git@github.com:redbox-mint-contrib/vital-fedora3-plus.git</connection>
+        <developerConnection>scm:git:git@github.com:redbox-mint-contrib/vital-fedora3-plus.git</developerConnection>
         <tag>HEAD</tag>
     </scm>
 </project>
